@@ -1,0 +1,39 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+
+actor User
+participant "HTML Client" as Client
+participant "Auth Controller" as Auth
+participant "Token Service" as TokenSvc
+participant "ASP.NET Core\nMiddleware" as Middleware
+participant "MCP Server" as MCP
+participant "MCP Tools" as Tools
+
+== Authentication Flow ==
+User -> Client: Login (username/password)
+Client -> Auth: POST /api/auth/login
+Auth -> Auth: Validate credentials
+Auth -> TokenSvc: Generate JWT token
+Auth --> Client: Return JWT token
+Client -> Client: Store token in localStorage
+Client -> Client: Extract user roles from token
+
+== MCP Session Establishment ==
+Client -> MCP: GET /sse?access_token=jwt
+Middleware -> Middleware: Validate JWT token
+Middleware -> Middleware: Check authorization policies
+Middleware -> MCP: Allow if authorized
+MCP --> Client: SSE connection established
+MCP --> Client: Send message endpoint URL
+
+== Tool Execution Flow ==
+Client -> Client: Filter tools by user role
+User -> Client: Select and execute tool
+Client -> MCP: POST /message?sessionId=xyz
+Middleware -> Middleware: Validate JWT token
+Middleware -> Middleware: Check authorization policies
+MCP -> Tools: Execute tool if authorized
+Tools -> MCP: Return result
+MCP --> Client: Return tool execution result
+@enduml
