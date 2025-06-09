@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Authorization;
 using System.Text;
 using SecureMcpServer.Services;
 using SecureMcpServer.Middleware;
+using ModelContextProtocol.Server;
+using ModelContextProtocol.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +13,17 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Add CORS support
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowClientOrigin",
+        builder => builder
+            .WithOrigins("http://localhost:3000")
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .AllowCredentials());
+});
 
 // Register the token service
 builder.Services.AddSingleton<TokenService>();
@@ -29,10 +42,10 @@ builder.Services.AddAuthentication(options =>
         ValidateAudience = true,
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
-        ValidIssuer = builder.Configuration["Jwt:Issuer"],
-        ValidAudience = builder.Configuration["Jwt:Audience"],
+        ValidIssuer = builder.Configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("JWT Issuer not configured"),
+        ValidAudience = builder.Configuration["Jwt:Audience"] ?? throw new InvalidOperationException("JWT Audience not configured"),
         IssuerSigningKey = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
+            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key not configured")))
     };
     
     // Configure for SSE connections (critical for MCP over SSE)
@@ -65,12 +78,37 @@ builder.Services.AddAuthorization(options =>
         policy.RequireRole("Admin"));
 });
 
-// Add MCP server directly since extension method is not compatible with 0.2.0-preview.1
+// Configure MCP server with HTTP transport and security integration
 builder.Services.AddMcpServer()
-    .WithStdioServerTransport()
-    .WithToolsFromAssembly();
+    .WithHttpTransport(options => 
+    {
+        // Configure security for MCP sessions
+        options.RunSessionHandler = async (context, server, cancellationToken) =>
+        {
+            // Ensure the user is authenticated
+            if (context.User?.Identity?.IsAuthenticated != true)
+            {
+                context.Response.StatusCode = 401; // Unauthorized
+                await context.Response.WriteAsync("Authentication required for MCP server access");
+                return;
+            }
 
-// Note: Authorization will need to be configured differently with this version
+            // Check if user has the required role/policy
+            var authService = context.RequestServices.GetRequiredService<IAuthorizationService>();
+            var authResult = await authService.AuthorizeAsync(context.User, null, "McpAccess");
+            
+            if (!authResult.Succeeded)
+            {
+                context.Response.StatusCode = 403; // Forbidden
+                await context.Response.WriteAsync("You do not have permission to access the MCP server");
+                return;
+            }
+            
+            // User is authorized, run the MCP server session
+            await server.RunAsync(cancellationToken);
+        };
+    })
+    .WithToolsFromAssembly();
 
 var app = builder.Build();
 
@@ -82,9 +120,16 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// Enable CORS
+app.UseCors("AllowClientOrigin");
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+
+// Map the MCP endpoint to the /sse path
+app.MapMcp("/sse");
 
 // Run the application
 app.Run();
