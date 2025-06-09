@@ -22,6 +22,7 @@ const connectionStatus = document.getElementById('connectionStatus');
 
 // State
 let authToken = localStorage.getItem('mcp_auth_token');
+let userRoles = [];
 let currentTools = [];
 let selectedTool = null;
 let eventSource = null;
@@ -74,6 +75,27 @@ async function handleLogin(event) {
         
         // Save token to localStorage
         localStorage.setItem('mcp_auth_token', authToken);
+        
+        // Extract user information from the JWT token
+        try {
+            const tokenParts = authToken.split('.');
+            if (tokenParts.length === 3) {
+                const payload = JSON.parse(atob(tokenParts[1]));
+                console.log('Token payload:', payload);
+                
+                // Extract roles from the token
+                // Role claim is typically 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role'
+                const roleClaim = 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role';
+                if (payload[roleClaim]) {
+                    userRoles = Array.isArray(payload[roleClaim]) ? 
+                        payload[roleClaim] : [payload[roleClaim]];
+                    console.log('User roles:', userRoles);
+                    addResponse(`Logged in with roles: ${userRoles.join(', ')}`, 'info');
+                }
+            }
+        } catch (error) {
+            console.error('Error parsing JWT token:', error);
+        }
         
         showMcpInterface();
         connectToMcpServer();
@@ -200,13 +222,15 @@ function fetchMcpTools() {
 function handleToolsList(result) {
     console.log('Processing tools list:', result);
     
+    let allTools = [];
+    
     // Check if result is an array (direct tools array)
     if (Array.isArray(result)) {
-        currentTools = result;
+        allTools = result;
     } 
     // Check if result has a tools property (nested tools array)
     else if (result && Array.isArray(result.tools)) {
-        currentTools = result.tools;
+        allTools = result.tools;
     } 
     // No valid tools found
     else {
@@ -215,8 +239,36 @@ function handleToolsList(result) {
         return;
     }
     
-    addResponse(`Found ${currentTools.length} tools`, 'info');
+    // Filter tools based on user roles
+    currentTools = filterToolsByUserRole(allTools);
+    
+    addResponse(`Found ${allTools.length} total tools, ${currentTools.length} available for your role`, 'info');
     renderToolsList();
+}
+
+// Filter tools based on user roles
+function filterToolsByUserRole(tools) {
+    // If no tools, return empty array
+    if (!tools || !Array.isArray(tools)) return [];
+    
+    return tools.filter(tool => {
+        // If tool has no authorization metadata, assume it's available to all
+        if (!tool.metadata || !tool.metadata.authorization) return true;
+        
+        // Check if the tool requires admin role
+        const requiresAdmin = tool.name === 'AdminTool' || 
+                             (tool.metadata && 
+                              tool.metadata.authorization && 
+                              tool.metadata.authorization.policy === 'McpAdminTools');
+        
+        // If tool requires admin role, check if user has Admin role
+        if (requiresAdmin) {
+            return userRoles.includes('Admin');
+        }
+        
+        // For other tools, check if user has at least User role
+        return userRoles.includes('User');
+    });
 }
 
 function renderToolsList() {

@@ -34,12 +34,13 @@ namespace SecureMcpServer.Controllers
             return Unauthorized();
         }
         
-        // Simplified validation - replace with actual authentication logic
+        // Improved validation - still demo but with fixed credentials
         private bool IsValidUser(string username, string password)
         {
-            // In production, validate against secure credential store
-            // For demo purposes, accept any non-empty credentials
-            return !string.IsNullOrEmpty(username) && !string.IsNullOrEmpty(password);
+            // In production, validate against secure credential store with proper password hashing
+            // For this demo, we use fixed credentials
+            return (username.ToLower() == "user" && password == "password") ||
+                   (username.ToLower() == "admin" && password == "adminpassword");
         }
         
         private string[] GetUserRoles(string username)
