@@ -59,7 +59,7 @@ builder.Services.AddAuthentication(options =>
             // Check if the request is for our MCP endpoint
             var path = context.HttpContext.Request.Path;
             if (!string.IsNullOrEmpty(accessToken) && 
-                path.StartsWithSegments("/mcp"))
+                path.StartsWithSegments("/sse"))
             {
                 context.Token = accessToken;
             }
@@ -128,8 +128,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// Map the MCP endpoint to the /sse path
-app.MapMcp("/sse");
+// Map the MCP endpoint with default paths
+app.MapMcp();
 
 // Run the application
 app.Run();
